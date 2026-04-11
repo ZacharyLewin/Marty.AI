@@ -1,8 +1,6 @@
-# AI'dvisor — McGill AI Student Advisor
+# Marty.AI — McGill AI Student Advisor
 
-An AI-powered student advisor for McGill University. Ask questions about
-registration, financial aid, wellness, housing, international student services,
-and more — and get answers grounded in real McGill web content.
+An AI-powered student advisor for McGill Students. Skip the hussle and bustle of navigating the McGill online maze. Dont stress about getting an advisor meeting. Instead, Ask Marty!
 
 ---
 
