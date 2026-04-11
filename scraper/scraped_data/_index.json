@@ -1,0 +1,37 @@
+[
+  {
+    "url": "https://www.mcgill.ca/registrar/registration/",
+    "filename": "mcgill_ca_registrar_registration_abc12345.md",
+    "time_sensitive": true,
+    "scraped_at": "2026-04-10T00:00:00Z",
+    "content_hash": "placeholder"
+  },
+  {
+    "url": "https://www.mcgill.ca/studentaid/",
+    "filename": "mcgill_ca_studentaid_bursaries_def67890.md",
+    "time_sensitive": true,
+    "scraped_at": "2026-04-10T00:00:00Z",
+    "content_hash": "placeholder"
+  },
+  {
+    "url": "https://www.mcgill.ca/caps/",
+    "filename": "mcgill_ca_caps_wellness_ghi11121.md",
+    "time_sensitive": false,
+    "scraped_at": "2026-04-10T00:00:00Z",
+    "content_hash": "placeholder"
+  },
+  {
+    "url": "https://www.mcgill.ca/internationalstudents/",
+    "filename": "mcgill_ca_internationalstudents_jkl31415.md",
+    "time_sensitive": false,
+    "scraped_at": "2026-04-10T00:00:00Z",
+    "content_hash": "placeholder"
+  },
+  {
+    "url": "https://www.mcgill.ca/students/",
+    "filename": "mcgill_ca_students_mno92653.md",
+    "time_sensitive": false,
+    "scraped_at": "2026-04-10T00:00:00Z",
+    "content_hash": "placeholder"
+  }
+]

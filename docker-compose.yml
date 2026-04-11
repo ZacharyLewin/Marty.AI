@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+
+  # ── ChromaDB vector store ────────────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: aidvisor_chromadb
+    restart: unless-stopped
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "8001:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI backend ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: aidvisor_backend
+    restart: unless-stopped
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
+      - EMBED_BACKEND=${EMBED_BACKEND:-openai}
+      # Point at the Docker-internal ChromaDB service
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    volumes:
+      - ./scraper/scraped_data:/app/scraper/scraped_data:ro
+      - chroma_data:/app/chroma_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Nginx — serves the frontend and reverse-proxies the API ─────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: aidvisor_nginx
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  chroma_data:
