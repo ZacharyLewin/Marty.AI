@@ -5,7 +5,7 @@ services:
   # ── ChromaDB vector store ────────────────────────────────────────────────────
   chromadb:
     image: chromadb/chroma:latest
-    container_name: aidvisor_chromadb
+    container_name: marty_chromadb
     restart: unless-stopped
     volumes:
       - chroma_data:/chroma/chroma
@@ -25,7 +25,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    container_name: aidvisor_backend
+    container_name: marty_backend
     restart: unless-stopped
     depends_on:
       chromadb:
@@ -52,7 +52,7 @@ services:
   # ── Nginx — serves the frontend and reverse-proxies the API ─────────────────
   nginx:
     image: nginx:alpine
-    container_name: aidvisor_nginx
+    container_name: marty_nginx
     restart: unless-stopped
     depends_on:
       backend:

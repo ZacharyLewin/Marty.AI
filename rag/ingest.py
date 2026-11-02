@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI'dvisor McGill Advisor — RAG Ingestion Pipeline
+Marty.AI — RAG Ingestion Pipeline
 Chunks scraped Markdown, embeds, and upserts into a persistent ChromaDB collection.
 
 Usage:
@@ -26,6 +26,7 @@ import chromadb
 from chromadb.config import Settings
 
 SCRAPED_DATA_DIR = Path(__file__).parent.parent / "scraper" / "scraped_data"
+KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 CHROMA_PERSIST_DIR = Path(__file__).parent.parent / "chroma_data"
 COLLECTION_NAME = "mcgill_advisor"
 
@@ -223,17 +224,62 @@ def ingest_file(filepath: Path, source_url: str) -> int:
     return total
 
 
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Split a simple `key: value` YAML-style frontmatter block from the body."""
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}, text
+    meta: dict = {}
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            meta[key.strip()] = value.strip()
+    return meta, text[m.end():]
+
+
+def ingest_knowledge(knowledge_dir: Path = KNOWLEDGE_DIR) -> int:
+    """
+    Ingest hand-curated Markdown in knowledge/ (careers, fairs, clubs, culture).
+
+    These files live outside scraped_data/ so a fresh crawl (which rewrites
+    _index.json) can never drop them. Each file carries its own source_url in
+    frontmatter.
+    """
+    if not knowledge_dir.exists():
+        return 0
+    total = 0
+    for path in sorted(knowledge_dir.glob("*.md")):
+        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+        source_url = meta.get("source_url", f"marty://knowledge/{path.stem}")
+        verified = meta.get("verified")
+        if verified:
+            body = f"(Curated by Marty; last verified {verified}.)\n\n{body}"
+        tmp = path.with_suffix(".ingest.tmp")
+        tmp.write_text(body, encoding="utf-8")
+        try:
+            n = ingest_file(tmp, source_url)
+        finally:
+            tmp.unlink(missing_ok=True)
+        log.info("  [knowledge] %-58s  %d chunks", path.name, n)
+        total += n
+    return total
+
+
 def run_ingestion(data_dir: Path = SCRAPED_DATA_DIR) -> None:
     manifest_path = data_dir / "_index.json"
-    if not manifest_path.exists():
+    index: list[dict] = []
+    if manifest_path.exists():
+        index = json.loads(manifest_path.read_text(encoding="utf-8"))
+    elif not KNOWLEDGE_DIR.exists():
         raise FileNotFoundError(
             f"Manifest not found at {manifest_path}. Run the scraper first:\n"
             "  python scraper/scraper.py --quick"
         )
-
-    index: list[dict] = json.loads(manifest_path.read_text(encoding="utf-8"))
     log.info(
-        "Ingesting %d documents (embed backend: %s)",
+        "Ingesting %d scraped documents + knowledge/ (embed backend: %s)",
         len(index), "openai" if USE_OPENAI else "sentence-transformers",
     )
 
@@ -247,6 +293,7 @@ def run_ingestion(data_dir: Path = SCRAPED_DATA_DIR) -> None:
         log.info("  %-70s  %d chunks", entry["filename"][:70], n)
         total_chunks += n
 
+    total_chunks += ingest_knowledge()
     log.info("Ingestion complete. Total chunks upserted: %d", total_chunks)
 
 

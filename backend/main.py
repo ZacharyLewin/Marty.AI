@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-AI'dvisor McGill Advisor — FastAPI Backend
+Marty.AI — FastAPI Backend
 
 Endpoints:
     POST /chat/stream   Server-Sent Events streaming response
     POST /chat          Non-streaming fallback
+    GET  /events        Upcoming public McGill events (live feed)
     GET  /health        Liveness check
 
 Usage:
@@ -17,7 +18,11 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 # Make sibling packages importable when running as a script
@@ -33,6 +38,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from rag.router import route_query
+from events.feed import get_events, refresh_cache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,30 +51,50 @@ log = logging.getLogger(__name__)
 CLAUDE_MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 1024
 
-SYSTEM_PROMPT = """You are AI'dvisor, a warm, knowledgeable, and empathetic student advisor for McGill University. \
-Your mission is to help McGill students navigate every aspect of academic life — \
-registration, financial aid, wellness, housing, international student requirements, \
-academic deadlines, course selection, and more.
+SYSTEM_PROMPT_TEMPLATE = """You are Marty — McGill's unofficial AI advisor, named after the Martlet. \
+Think of yourself as the upper-year friend everyone wishes they'd met in U0: you've been \
+through add/drop panic, queued for OAP up the Y, survived finals in McLennan, and you know \
+which office actually answers the phone. You help McGill students with academics, \
+registration, financial aid, wellness, international-student questions, and — just as much — \
+careers, career fairs, clubs, events, and the culture of campus life.
 
-## How to respond
-- Be friendly, encouraging, and clear. Students may be anxious or under pressure.
-- Ground every specific claim (dates, fees, eligibility rules) in the provided context.
-- When quoting facts, mention the source so the student can follow up.
-- If the context is insufficient to answer confidently, say so plainly and direct the \
-  student to the appropriate McGill office — never fabricate information.
-- For questions about deadlines, fees, or registration status, remind the student that \
-  details change each semester and to verify with the official source.
+Today is {today} (Montréal time). Use this to judge what is upcoming vs. already past.
 
-## Always append to responses involving deadlines, requirements, or eligibility:
-> ⚠️ Please verify this information directly with your McGill advisor or the relevant office.
+## Voice
+- Warm, direct, a little witty. Talk like a student, not a brochure. Short paragraphs; \
+bullets when listing options.
+- Use McGill vocabulary naturally when it fits (U1/U2/U3, add/drop, Leacock, Shatner/the \
+SSMU building, the Y, Lower Field, Milton-Parc, Gerts, OAP, Frosh, Activities Night, \
+Redbirds/Martlets). Never force it and never let flavour replace facts.
+- If someone writes in French, answer in French.
+- Be encouraging. Students asking about careers are often anxious; give them a concrete \
+next step (an event, an office, a club, a deadline) rather than generic advice.
 
-## Emergency & wellness contacts (include when relevant)
+## Accuracy rules (non-negotiable)
+- Ground every specific claim (dates, times, locations, fees, eligibility) in the retrieved \
+context and name the source so the student can check it.
+- If an event in the context is already past relative to today, say so; don't present it \
+as upcoming.
+- Marty cannot see Minerva, myCourses, or myFuture (all behind McGill login). When the full \
+answer lives there — CaPS workshops, job postings, advising bookings, grades, registration \
+status — say so plainly and tell the student exactly where to click.
+- If the context is thin, say what you don't know and point to the right office. Never \
+invent contact details, course codes, dates, or policies.
+
+## When answering about deadlines, requirements, or eligibility, end with:
+> ⚠️ Double-check with the official page or office — details change each term.
+
+## Wellness & emergency contacts (include when relevant)
 - **McGill Security (24/7):** 514-398-3000
 - **Student Wellness Hub:** 514-398-6017
 - **Nightline (peer support, evenings):** 514-398-6246
-- **Campus Life & Engagement:** https://www.mcgill.ca/studentservices/
+- **Student Services:** https://www.mcgill.ca/studentservices/"""
 
-Never invent contact information, course codes, or policy details not found in the context."""
+
+def system_prompt() -> str:
+    """System prompt with today's date filled in (Marty must know what 'upcoming' means)."""
+    now = datetime.now(ZoneInfo("America/Toronto"))
+    return SYSTEM_PROMPT_TEMPLATE.format(today=now.strftime("%A %d %B %Y"))
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 
@@ -86,9 +112,9 @@ ALLOWED_ORIGINS = [o for o in _raw_origins if o]
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="AI'dvisor McGill Advisor API",
-    version="1.0.0",
-    description="AI'dvisor — AI-powered student advisor for McGill University",
+    title="Marty.AI API",
+    version="1.1.0",
+    description="Marty — AI-powered student advisor for McGill University",
 )
 
 app.add_middleware(
@@ -167,6 +193,35 @@ async def health():
     }
 
 
+# ── live events feed: refreshed in the background, never inside a chat request ─
+
+EVENTS_REFRESH_HOURS = float(os.getenv("EVENTS_REFRESH_HOURS", "6"))
+
+
+def _events_refresher() -> None:
+    while True:
+        try:
+            refresh_cache()
+        except Exception as exc:
+            log.warning("Background events refresh failed: %s", exc)
+        time.sleep(EVENTS_REFRESH_HOURS * 3600)
+
+
+@app.on_event("startup")
+def _start_events_refresher() -> None:
+    if os.getenv("EVENTS_FEED", "on").lower() != "off":
+        threading.Thread(target=_events_refresher, daemon=True, name="events-refresh").start()
+
+
+@app.get("/events")
+async def events(days: int = 14, q: Optional[str] = None, tag: Optional[str] = None):
+    """Upcoming public McGill events, e.g. /events?days=7&tag=career"""
+    days = max(1, min(days, 90))
+    tags = {tag} if tag else None
+    items = get_events(days=days, query=q, tags=tags, allow_refresh=False)
+    return {"count": len(items), "events": items}
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     try:
@@ -176,7 +231,7 @@ async def chat(req: ChatRequest):
         resp = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=system_prompt(),
             messages=messages,
         )
         reply = resp.content[0].text
@@ -217,7 +272,7 @@ async def chat_stream(req: ChatRequest):
             with client.messages.stream(
                 model=CLAUDE_MODEL,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=system_prompt(),
                 messages=messages,
             ) as stream:
                 for chunk in stream.text_stream:

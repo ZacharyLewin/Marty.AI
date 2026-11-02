@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI'dvisor McGill Advisor — Web Scraper
+Marty.AI — Web Scraper
 Crawls mcgill.ca and saves clean Markdown files + an _index.json manifest.
 
 Usage:
@@ -35,6 +35,18 @@ SEED_URLS: list[str] = [
     "https://www.mcgill.ca/science/students/",
     "https://www.mcgill.ca/engineering/students/",
     "https://www.mcgill.ca/desautels/programs/",
+    # Careers (public pages — myFuture itself needs a McGill login)
+    "https://www.mcgill.ca/caps/students/services/careerfairs/",
+    "https://www.mcgill.ca/caps/students/services/advising/",
+    "https://www.mcgill.ca/caps/students/services/mentor/",
+    "https://www.mcgill.ca/caps/students/service-eligibility/",
+    "https://www.mcgill.ca/desautels/career/",
+    "https://www.mcgill.ca/careers4engineers/",
+    "https://www.mcgill.ca/cdo/",
+    # Involvement & campus life
+    "https://www.mcgill.ca/cle/student-led-clubs-societies-and-associations/",
+    "https://www.mcgill.ca/desautels/programs/bcom/student-life-resources/student-clubs/",
+    "https://www.mcgill.ca/mentoring/",
 ]
 
 # URL path patterns that indicate time-sensitive content
@@ -53,6 +65,10 @@ TIME_SENSITIVE_PATTERNS: list[str] = [
     r"award",
     r"schedule",
     r"key.dates",
+    r"careerfairs",
+    r"career.fair",
+    r"techfair",
+    r"events",
 ]
 _TS_RE = re.compile("|".join(TIME_SENSITIVE_PATTERNS), re.IGNORECASE)
 
@@ -60,7 +76,7 @@ MAX_PAGES = 200
 REQUEST_DELAY = 1.5          # seconds between fetches
 MAX_LINKS_PER_PAGE = 40      # guard against link explosion
 ALLOWED_DOMAIN = "mcgill.ca"
-USER_AGENT = "AIdvisorBot/1.0 (educational research; not-for-profit)"
+USER_AGENT = "MartyAIBot/1.0 (educational research; not-for-profit)"
 OUTPUT_DIR = Path(__file__).parent / "scraped_data"
 
 # Tags that are pure chrome and add no informational value
@@ -359,7 +375,7 @@ def crawl(max_pages: int = MAX_PAGES, output_dir: Path = OUTPUT_DIR) -> list[dic
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="AI'dvisor McGill web scraper")
+    parser = argparse.ArgumentParser(description="Marty.AI McGill web scraper")
     parser.add_argument(
         "--max-pages", type=int, default=MAX_PAGES,
         help=f"Maximum pages to crawl (default: {MAX_PAGES})",

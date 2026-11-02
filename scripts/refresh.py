@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI'dvisor McGill Advisor — Weekly Refresh Scheduler
+Marty.AI — Weekly Refresh Scheduler
 Re-crawls only time-sensitive pages (deadlines, fees, registration) and
 re-embeds chunks whose content has changed since the last scrape.
 
@@ -35,7 +35,7 @@ from rag.ingest import ingest_file, get_collection
 SCRAPED_DATA_DIR = Path(__file__).parent.parent / "scraper" / "scraped_data"
 LOG_DIR = Path(__file__).parent.parent / "logs"
 REQUEST_DELAY = 2.0
-USER_AGENT = "AIdvisorBot/1.0 (educational)"
+USER_AGENT = "MartyAIBot/1.0 (educational)"
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -214,7 +214,7 @@ def _write_change_log(entries: list[dict]) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="AI'dvisor weekly content refresh")
+    parser = argparse.ArgumentParser(description="Marty.AI weekly content refresh")
     parser.add_argument(
         "--apply", action="store_true",
         help="Write changes to disk and re-ingest into ChromaDB (default: dry-run preview)",
@@ -223,6 +223,16 @@ if __name__ == "__main__":
         "--all", dest="all_pages", action="store_true",
         help="Refresh all pages in the manifest, not just time-sensitive ones",
     )
+    parser.add_argument(
+        "--skip-events", action="store_true",
+        help="Don't refresh the live events feed cache",
+    )
     args = parser.parse_args()
 
     run_refresh(apply=args.apply, all_pages=args.all_pages)
+
+    if args.apply and not args.skip_events:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from events.feed import refresh_cache
+        log.info("Refreshing live events feed…")
+        refresh_cache()

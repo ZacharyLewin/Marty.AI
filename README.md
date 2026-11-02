@@ -8,15 +8,36 @@ An AI-powered student advisor for McGill Students. Skip the hussle and bustle of
 
 ```
 scraper/scraper.py          Crawls mcgill.ca → Markdown files
+knowledge/*.md              Hand-curated: careers, fairs, clubs, campus culture
          ↓
-rag/ingest.py               Chunks + embeds → ChromaDB
+rag/ingest.py               Chunks + embeds both → ChromaDB
          ↓
-rag/router.py               Routes queries (vector store OR live fetch)
+events/feed.py              Live public McGill events (iCal) → events_cache.json
          ↓
-backend/main.py             FastAPI — /chat/stream SSE + /chat REST
+rag/router.py               Routes queries (vector store / live fetch / events feed)
          ↓
-frontend/index.html         Single-file chat UI (no build step)
+backend/main.py             FastAPI — /chat/stream SSE, /chat, /events
+         ↓
+frontend/index.html         Single-file chat UI + "This week at McGill" strip
 ```
+
+## What Marty knows
+
+| Area | Where it comes from |
+|---|---|
+| Registration, aid, wellness, international students | Scraped mcgill.ca pages |
+| Career fairs (2026–27 calendar), CaPS, faculty career centres, Mentor Program | `knowledge/` (curated, each file has `source_url` + `verified` date) + scraped career pages |
+| Clubs, SSMU, Activities Night, finance/consulting/tech clubs | `knowledge/clubs_and_involvement.md` |
+| Traditions, places, slang (OAP, Gerts, Frosh, the Y, U0–U3…) | `knowledge/campus_culture.md` |
+| What's on this week | `events/feed.py` live feed |
+
+**What Marty can't see:** Minerva, myCourses and myFuture all sit behind McGill login.
+CaPS moved its own events calendar into myFuture, so Marty points students there for
+CaPS workshops, job postings and advising bookings.
+
+### Updating the curated knowledge
+Edit any file in `knowledge/`, bump its `verified:` date, then re-run `python rag/ingest.py`.
+The career-fair table needs a refresh each September when the new year's dates go up.
 
 ---
 
@@ -25,7 +46,7 @@ frontend/index.html         Single-file chat UI (no build step)
 ### 1. Install dependencies
 
 ```bash
-cd minerva
+cd marty.ai
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -96,6 +117,24 @@ python rag/router.py "What are the add/drop deadlines this semester?"
 python rag/router.py "How do I apply for a bursary?"
 ```
 
+### Live events feed
+```bash
+python events/feed.py                     # crawl public McGill event pages, print next 14 days
+python events/feed.py --days 30 --q "career"
+python events/feed.py --no-refresh        # just read the cache
+```
+The backend refreshes the feed in a background thread on startup and every
+`EVENTS_REFRESH_HOURS` (default 6). Set `EVENTS_FEED=off` to disable. Event sources are
+listed in `EVENT_SOURCES` at the top of `events/feed.py`; a source that breaks is skipped.
+
+`GET /events?days=7&tag=career&q=fair` returns the cached events as JSON.
+
+### Tests
+```bash
+pip install pytest httpx
+python -m pytest -q tests
+```
+
 ### Refresh Scheduler
 ```bash
 # Dry run — see what has changed without writing anything:
@@ -105,7 +144,7 @@ python scripts/refresh.py
 python scripts/refresh.py --apply
 
 # Weekly cron (2 AM every Sunday):
-# 0 2 * * 0  cd /path/to/minerva && /path/to/.venv/bin/python scripts/refresh.py --apply
+# 0 2 * * 0  cd /path/to/marty.ai && /path/to/.venv/bin/python scripts/refresh.py --apply
 ```
 
 ---
@@ -178,7 +217,7 @@ Services:
 ## Project structure
 
 ```
-minerva/
+marty.ai/
 ├── scraper/
 │   ├── scraper.py          Web crawler
 │   └── scraped_data/       Markdown pages + _index.json

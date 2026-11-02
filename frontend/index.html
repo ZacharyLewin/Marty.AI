@@ -83,6 +83,39 @@
       margin-bottom: 1.5rem;
     }
 
+    /* ── quick-start chips & "this week" strip ───────────────────────── */
+    #welcome-chips {
+      display: flex; flex-wrap: wrap; justify-content: center;
+      gap: .5rem; margin-top: 1rem;
+    }
+    .chip {
+      font-family: 'Inter', sans-serif; font-size: .82rem;
+      color: var(--near-black); background: var(--white);
+      border: 1.5px solid var(--border); border-radius: 999px;
+      padding: .4rem .85rem; cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    .chip:hover, .chip:focus-visible { border-color: var(--red); color: var(--red); outline: none; }
+
+    #this-week { margin-top: 1.5rem; text-align: left; display: none; }
+    #this-week h2 {
+      font-size: .75rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--gray); margin-bottom: .5rem; text-align: center;
+    }
+    #this-week ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
+    #this-week li a {
+      display: flex; gap: .75rem; align-items: baseline; text-decoration: none;
+      background: var(--white); border: 1px solid var(--border); border-radius: 10px;
+      padding: .5rem .8rem; color: var(--near-black); font-size: .85rem;
+    }
+    #this-week li a:hover { border-color: var(--red); }
+    #this-week .ev-date { color: var(--red); font-weight: 600; white-space: nowrap; min-width: 4.5rem; }
+    #this-week .ev-title { flex: 1; }
+
+    @media (max-width: 640px) {
+      #welcome-chips, #this-week { display: none !important; }
+    }
+
     /* ── shared input bar ───────────────────────────────────────────── */
     /* desktop: inline below welcome heading */
     #welcome-input-wrap {
@@ -462,6 +495,19 @@
       </button>
     </div>
     <p class="input-hint">Enter to send &middot; Shift+Enter for new line</p>
+
+    <div id="welcome-chips" aria-label="Suggested questions">
+      <button class="chip" data-q="What career fairs are coming up at McGill?">🎯 Upcoming career fairs</button>
+      <button class="chip" data-q="What's happening on campus this week?">📅 What's on this week</button>
+      <button class="chip" data-q="Which clubs should I look at for finance or consulting?">💼 Finance &amp; consulting clubs</button>
+      <button class="chip" data-q="How do I get a CaPS advisor to look at my CV?">📝 Get my CV reviewed</button>
+      <button class="chip" data-q="I'm new — explain McGill slang and traditions like OAP, Gerts and Frosh.">🐦 McGill 101</button>
+    </div>
+
+    <section id="this-week" aria-live="polite">
+      <h2>This week at McGill</h2>
+      <ul id="this-week-list"></ul>
+    </section>
   </div>
 
 </div>
@@ -603,19 +649,27 @@
     }
   }
 
-  // ── markdown via marked.js ─────────────────────────────────────────
-  marked.setOptions({
-    breaks: true,       // single newline → <br>
-    gfm: true,          // GitHub-flavoured (tables, strikethrough, etc.)
-  });
+  // ── markdown via marked.js (falls back to plain text if the CDN is unreachable) ──
+  const hasMarked = typeof marked !== "undefined";
+  let renderer = null;
+  if (hasMarked) {
+    marked.setOptions({
+      breaks: true,       // single newline → <br>
+      gfm: true,          // GitHub-flavoured (tables, strikethrough, etc.)
+    });
+    // Open all links in a new tab
+    renderer = new marked.Renderer();
+    renderer.link = (href, title, text) =>
+      `<a href="${href}" target="_blank" rel="noopener"${title ? ` title="${title}"` : ''}>${text}</a>`;
+  }
 
-  // Open all links in a new tab
-  const renderer = new marked.Renderer();
-  renderer.link = (href, title, text) =>
-    `<a href="${href}" target="_blank" rel="noopener"${title ? ` title="${title}"` : ''}>${text}</a>`;
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
 
   function renderMarkdown(text) {
-    return marked.parse(text, { renderer });
+    if (hasMarked) return marked.parse(text, { renderer });
+    return escapeHtml(text).replace(/\n/g, "<br>");
   }
 
   // ── append message ─────────────────────────────────────────────────
@@ -787,6 +841,36 @@
     chatSend.disabled = true;
     streamMessage(text);
   }
+
+  // ── quick-start chips ──────────────────────────────────────────────────────
+  document.querySelectorAll("#welcome-chips .chip").forEach((chip) => {
+    chip.addEventListener("click", () => submitMessage(chip.dataset.q));
+  });
+
+  // ── "This week at McGill" strip (live events feed) ─────────────────────────
+  async function loadThisWeek() {
+    try {
+      const res = await fetch(`${API_BASE}/events?days=7`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = document.getElementById("this-week-list");
+      const items = (data.events || []).slice(0, 4);
+      if (!items.length) return;
+      list.innerHTML = "";
+      for (const ev of items) {
+        const d = new Date(ev.start);
+        const when = d.toLocaleDateString("en-CA", { weekday: "short", day: "numeric", month: "short" });
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = ev.url || "#"; a.target = "_blank"; a.rel = "noopener";
+        const ds = document.createElement("span"); ds.className = "ev-date"; ds.textContent = when;
+        const ts = document.createElement("span"); ts.className = "ev-title"; ts.textContent = ev.title || "Event";
+        a.append(ds, ts); li.append(a); list.append(li);
+      }
+      document.getElementById("this-week").style.display = "block";
+    } catch (_) { /* backend offline: strip just stays hidden */ }
+  }
+  loadThisWeek();
 </script>
 
 </body>

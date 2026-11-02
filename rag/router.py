@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI'dvisor McGill Advisor — Hybrid Query Router
+Marty.AI — Hybrid Query Router
 Routes student questions to either the vector store or a live web fetch.
 
 Usage (standalone test):
@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 SCRAPED_DATA_DIR = Path(__file__).parent.parent / "scraper" / "scraped_data"
 LIVE_FETCH_TIMEOUT = 10       # seconds
 LIVE_FETCH_MAX_CHARS = 4000   # truncate live text to keep prompts reasonable
-USER_AGENT = "AIdvisorBot/1.0 (educational)"
+USER_AGENT = "MartyAIBot/1.0 (educational)"
 
 # Regex patterns that signal the answer may change day-to-day
 _TS_PATTERNS = [
@@ -59,6 +59,65 @@ log = logging.getLogger(__name__)
 def is_time_sensitive(query: str) -> bool:
     """Return True if the query is likely asking about time-sensitive information."""
     return bool(_TS_RE.search(query))
+
+
+# Questions about what's on — events, fairs, workshops, things to do.
+_EVENTS_PATTERNS = [
+    r"\bevents?\b",
+    r"\bfairs?\b",
+    r"\bworkshops?\b",
+    r"\binfo(rmation)?\s+sessions?\b",
+    r"\bnetworking\b",
+    r"\bactivities\s+night\b",
+    r"\bwhat'?s\s+(on|happening|going\s+on)\b",
+    r"\bhappening\b",
+    r"\b(this|next)\s+(week|weekend|month)\b",
+    r"\btonight\b",
+    r"\btomorrow\b",
+    r"\bupcoming\b",
+    r"\bthings\s+to\s+do\b",
+    r"\bpanels?\b",
+    r"\bspeakers?\b",
+    r"\boap\b|\bopen\s+air\s+pub\b",
+]
+_EVENTS_RE = re.compile("|".join(_EVENTS_PATTERNS), re.IGNORECASE)
+
+_EVENT_TAG_HINTS = {
+    "career": r"career|job|recruit|employer|internship|network|fair|cv|resume|interview|finance|consult",
+    "clubs": r"club|activities night|ssmu|involved|society|volunteer",
+    "wellness": r"wellness|mental|stress|support|yoga|mindful",
+    "social": r"social|party|fun|meet people|friends|oap|pub",
+    "academic": r"lecture|talk|seminar|panel|speaker",
+}
+
+
+def is_events_query(query: str) -> bool:
+    """Return True if the student is asking what's on / upcoming events."""
+    return bool(_EVENTS_RE.search(query))
+
+
+def _event_tags_for(query: str) -> Optional[set[str]]:
+    tags = {t for t, pat in _EVENT_TAG_HINTS.items() if re.search(pat, query, re.I)}
+    return tags or None
+
+
+def _events_context(question: str) -> Optional[dict]:
+    """Pull upcoming events from the live feed cache (never blocks on a crawl)."""
+    try:
+        from events.feed import get_events, format_events_for_prompt
+    except Exception as exc:  # pragma: no cover
+        log.warning("Events feed unavailable: %s", exc)
+        return None
+    days = 30 if re.search(r"month|semester|term", question, re.I) else 14
+    events = get_events(days=days, tags=_event_tags_for(question), allow_refresh=False)
+    if not events:
+        events = get_events(days=days, allow_refresh=False)  # broaden before giving up
+    if not events:
+        return None
+    return {
+        "text": "Upcoming public McGill events (live feed):\n" + format_events_for_prompt(events),
+        "sources": [e["url"] for e in events[:8] if e.get("url")],
+    }
 
 
 def _load_sensitive_urls() -> list[dict]:
@@ -139,7 +198,9 @@ def route_query(question: str, n_results: int = 6) -> dict:
             "is_live": bool,       # True when fetched live from mcgill.ca
         }
     """
-    if is_time_sensitive(question):
+    events_ctx = _events_context(question) if is_events_query(question) else None
+
+    if is_time_sensitive(question) and not events_ctx:
         log.info("Time-sensitive query — attempting live fetch")
         url = _pick_live_url(question)
         text = _live_fetch(url)
@@ -152,15 +213,27 @@ def route_query(question: str, n_results: int = 6) -> dict:
             }
         log.warning("Live fetch failed — falling back to vector store")
 
-    # General path: vector store
+    # General path: vector store (plus the live events feed when relevant)
     qvs = _get_vectorstore()
-    results = qvs(question, n_results=n_results)
-    if not results:
-        return {"text": "", "sources": [], "is_live": False}
+    try:
+        results = qvs(question, n_results=n_results)
+    except Exception as exc:
+        log.warning("Vector store query failed: %s", exc)
+        results = []
 
     parts: list[str] = []
     sources: list[str] = []
     seen: set[str] = set()
+
+    if events_ctx:
+        parts.append(events_ctx["text"])
+        for src in events_ctx["sources"]:
+            if src not in seen:
+                sources.append(src)
+                seen.add(src)
+
+    if not results and not parts:
+        return {"text": "", "sources": [], "is_live": False}
 
     for r in results:
         parts.append(r["text"])
@@ -171,8 +244,8 @@ def route_query(question: str, n_results: int = 6) -> dict:
 
     return {
         "text": "\n\n---\n\n".join(parts),
-        "sources": sources,
-        "is_live": False,
+        "sources": [s for s in sources if not s.startswith("marty://")],
+        "is_live": bool(events_ctx),
     }
 
 
@@ -184,7 +257,7 @@ if __name__ == "__main__":
 
     load_dotenv(Path(__file__).parent.parent / ".env")
 
-    parser = argparse.ArgumentParser(description="Test the AI'dvisor query router")
+    parser = argparse.ArgumentParser(description="Test the Marty.AI query router")
     parser.add_argument("query", nargs="?", default="What are the course add/drop deadlines?")
     args = parser.parse_args()
 
